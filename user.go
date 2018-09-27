@@ -311,27 +311,31 @@ func updatePassword(c *gin.Context) {
 
 // updatePhone 更新手机号
 func updatePhone(c *gin.Context) {
-	phone := c.Query("phone")
-	code := c.Query("code")
+	type Pc struct {
+		Phone string `json:"phone"`
+		Code  string `json:"code"`
+	}
+	var pc Pc
+	err := c.BindJSON(&pc)
+	if err != nil {
+		c.JSON(200, gin.H{"code": 401, "msg": "参数有误!"})
+		return
+	}
 	// 验证码验证
 	session := sessions.Default(c)
-	if code != "" {
+	if pc.Code != "" {
 		verify, ok := session.Get("code").(string)
 		if !ok {
 			c.JSON(200, gin.H{"code": 401, "msg": "验证码已失效"})
 			return
 		}
-		if code != verify {
+		if pc.Code != verify {
 			c.JSON(200, gin.H{"code": 401, "msg": "验证码验证失败"})
 			return
 		}
 		// 删除验证码
 		session.Delete("code")
 		session.Save()
-	}
-	if phone == "" {
-		c.JSON(200, gin.H{"code": 401, "msg": "手机号不能为空!"})
-		return
 	}
 	userID, ok := session.Get("uid").(int64)
 	if !ok {
@@ -340,15 +344,15 @@ func updatePhone(c *gin.Context) {
 	}
 	db := c.MustGet("DB").(*sqlx.DB)
 	var exists bool
-	db.QueryRow("SELECT EXISTS(SELECT id FROM users WHERE id = ? AND phone = ?)", userID, phone).Scan(&exists)
+	db.QueryRow("SELECT EXISTS(SELECT id FROM users WHERE id = ? AND phone = ?)", userID, pc.Phone).Scan(&exists)
 	if exists {
 		c.JSON(200, gin.H{"code": 401, "msg": "手机号不能与原手机号码相同!"})
 		return
 	}
-	_, err := db.Exec("UPDATE users SET phone = ? WHERE id = ?", phone, userID)
+	_, err = db.Exec("UPDATE users SET phone = ? WHERE id = ?", pc.Phone, userID)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 401, "msg": "更新失败!"})
 		return
 	}
-	c.JSON(200, gin.H{"code": 200, "data": "更新成功!", "phone": phone})
+	c.JSON(200, gin.H{"code": 200, "data": "更新成功!", "phone": pc.Phone})
 }
