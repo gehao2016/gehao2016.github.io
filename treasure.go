@@ -101,7 +101,8 @@ func createTreasure(c *gin.Context) {
 	query := "INSERT INTO house VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 	res, err := tx.Exec(query, nil, data.House.Roomnum, data.House.Officenum, data.House.Toiletnum,
 		data.House.Orientation, data.House.Decoration, data.House.Type, data.House.Acreage,
-		data.House.Height, data.House.Floor, pct[3], data.House.Evaluate, pct[0], pct[1], pct[2], data.House.Houseimg)
+		data.House.Height, data.House.Floor, pct[3], data.House.Evaluate, pct[0],
+		pct[1], pct[2], data.House.Houseimg)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 401, "msg": "房屋信息录入失败"})
 		return
@@ -277,7 +278,8 @@ func showTreasure(c *gin.Context) {
 	query := "SELECT t.id, t.sellway, t.openbusiness, t.opentime, t.house_id, t.housecard, t.housetype, t.propertyright, " +
 		"t.oneprice, t.decorationfree, t.title, t.`describe`, t.contacts, t.phone, t.type, t.contract, t.subtitle, ut.remain, h.evaluate, " +
 		"t.`status`, h.roomnum, h.officenum, h.toiletnum, h.orientation, h.decoration, h.type, h.houseimg, " +
-		"h.acreage, h.height, h.floor, h.adress FROM treasure AS t LEFT JOIN user_treasure AS ut ON t.id = ut.treasure_id " +
+		"h.acreage, h.height, h.floor, CONCAT(h.province, h.city, h.area, " +
+		"h.adress) FROM treasure AS t LEFT JOIN user_treasure AS ut ON t.id = ut.treasure_id " +
 		"LEFT JOIN house AS h ON t.house_id = h.id WHERE t.id = ?"
 	err := db.QueryRow(query, show.Treasure.ID).Scan(&show.Treasure.ID, &show.Treasure.Sellway, &show.Treasure.Openbusiness,
 		&show.Treasure.Opentime, &show.Treasure.HouseId, &show.Treasure.Housecard, &show.Treasure.Housetype,
@@ -521,7 +523,7 @@ func updateTreasure(c *gin.Context) {
 		c.JSON(200, gin.H{"code": 401, "msg": "不能修改有交易记录的宝贝"})
 		return
 	}
-	tx.QueryRow("SELECT EXISTS(SELECT id FROM treasure WHERE id = ? AND status <> 1 AND user_id = ?)", data.Treasure.ID,
+	tx.QueryRow("SELECT EXISTS(SELECT id FROM treasure WHERE id = ? AND status = 1 AND user_id = ?)", data.Treasure.ID,
 		userID).Scan(&exist)
 	if exist {
 		c.JSON(200, gin.H{"code": 401, "msg": "不能修改已审核的宝贝"})
@@ -531,8 +533,8 @@ func updateTreasure(c *gin.Context) {
 	var houseid int64
 	tx.QueryRow("SELECT house_id FROM treasure WHERE id = ?", data.Treasure.ID).Scan(&houseid)
 	// 更新宝贝信息
-	query := "UPDATE FROM treasure SET sellway = ?, openbusiness = ?, opentime = ?, housecard = ?, housetype = ?," +
-		"propertyright = ?, oneprice = ?, decoratinefree = ?, title = ?, describe = ?, contacts = ?, phone = ?, " +
+	query := "UPDATE treasure SET sellway = ?, openbusiness = ?, opentime = ?, housecard = ?, housetype = ?," +
+		"propertyright = ?, oneprice = ?, decorationfree = ?, title = ?, `describe` = ?, contacts = ?, phone = ?, " +
 		"status = 3, type = ?, contract = ?, subtitle = ? WHERE id = ?"
 	_, err = tx.Exec(query, data.Treasure.Sellway, data.Treasure.Openbusiness, data.Treasure.Opentime,
 		data.Treasure.Housecard,
@@ -543,8 +545,15 @@ func updateTreasure(c *gin.Context) {
 		c.JSON(200, gin.H{"code": 401, "msg": "更新宝贝信息失败"})
 		return
 	}
+	// 更新相应资产
+	query = "UPDATE user_treasure SET remain = ? WHERE user_id = ? AND treasure_id = ?"
+	_, err = tx.Exec(query, data.House.Acreage, userID, data.Treasure.ID)
+	if err != nil {
+		c.JSON(200, gin.H{"code": 401, "msg": "更新资产失败"})
+		return
+	}
 	// 更新房屋信息
-	query = "UPDATE FROM house SET roomnum = ?, offcenum = ?, toiletnum = ?, orientation = ?, decoration = ?, " +
+	query = "UPDATE house SET roomnum = ?, officenum = ?, toiletnum = ?, orientation = ?, decoration = ?, " +
 		"type = ?, acreage = ?, height = ?, floor = ?, adress = ?, evaluate = ?, province = ?, city = ?, area = ?, " +
 		"houseimg = ? WHERE id = ?"
 	pct := strings.Split(data.House.Adress, " ")
@@ -555,13 +564,28 @@ func updateTreasure(c *gin.Context) {
 		c.JSON(200, gin.H{"code": 401, "msg": "更新房屋信息失败"})
 		return
 	}
+	if data.House.Houseimg != "" {
+		// 删除图片
+		_, err = tx.Exec("DELETE FROM image WHERE id IN(?)", data.House.Houseimg)
+		if err != nil {
+			c.JSON(200, gin.H{"code": 401, "msg": "删除房屋图片失败"})
+			return
+		}
+	}
 	if len(data.House.Images) != 0 {
 		// 删除图片
+		_, err = tx.Exec("DELETE FROM image WHERE id IN(SELECT image_id FROM house_image WHERE house_id = ?)", houseid)
+		if err != nil {
+			c.JSON(200, gin.H{"code": 401, "msg": "删除图片失败"})
+			return
+		}
+		// 删除图片关联
 		_, err = tx.Exec("DELETE FROM house_image WHERE house_id = ?", houseid)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 401, "msg": "删除图片失败"})
 			return
 		}
+		// 新增图片
 		for _, image := range data.House.Images {
 			_, err = tx.Exec("INSERT INTO house_image VALUES (?, ?, ?)", nil, houseid, image)
 			if err != nil {

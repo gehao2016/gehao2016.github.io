@@ -427,7 +427,7 @@ DELETE /api/treasure?id=? 支持批量删除(id=1,2,3...)
 
 ### 修改宝贝 ###
 
-POST /api/treasure
+PUT /api/treasure/:id   ID 随便写
 
 ``` json
 {

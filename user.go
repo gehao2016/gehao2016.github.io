@@ -78,7 +78,7 @@ func register(c *gin.Context) {
 func login(c *gin.Context) {
 	type User struct {
 		Username string `db:"username"  json:"username"         binding:"required"`
-		Password string `db:"password"  json:"password"         binding:"required"`
+		Password string `db:"password"  json:"password,omitempty"`
 		Code     string `               json:"code,omitempty"`
 		BindIP   bool   `               json:"bindIp,omitempty"`
 		Status   bool   `               json:"status,omitempty"`
@@ -89,32 +89,24 @@ func login(c *gin.Context) {
 		c.JSON(200, gin.H{"code": 401, "msg": "请求参数有误"})
 		return
 	}
-	// 验证码验证
 	session := sessions.Default(c)
-	if !user.Status {
-		if user.Code != "" {
-			verify, ok := session.Get("code").(string)
-			if !ok {
-				c.JSON(200, gin.H{"code": 401, "msg": "验证码已失效"})
-				return
-			}
-			if user.Code != verify {
-				c.JSON(200, gin.H{"code": 401, "msg": "验证码验证失败"})
-				return
-			}
-			// 删除验证码
-			session.Delete("code")
-			session.Save()
-		}
-	}
-
-	// md5加密密码
-	sum := md5.Sum([]byte(user.Password))
-	user.Password = hex.EncodeToString(sum[:])
-
 	db := c.MustGet("DB").(*sqlx.DB)
-	if !user.Status {
-		query := "SELECT id, username, grade, phone FROM users WHERE username = ? AND password = ?"
+	// 如果密码为空
+	if user.Password == "" {
+		// 验证码验证
+		verify, ok := session.Get("code").(string)
+		if !ok {
+			c.JSON(200, gin.H{"code": 401, "msg": "验证码已失效"})
+			return
+		}
+		if user.Code != verify {
+			c.JSON(200, gin.H{"code": 401, "msg": "验证码验证失败"})
+			return
+		}
+		// 删除验证码
+		session.Delete("code")
+		session.Save()
+		query := "SELECT id, username, grade, phone FROM users WHERE phone = ?"
 		type Info struct {
 			ID       int64  `db:"id"       json:"id"`
 			Username string `db:"username" json:"username"`
@@ -122,13 +114,13 @@ func login(c *gin.Context) {
 			Phone    string `db:"phone"    json:"phone"`
 		}
 		var info Info
-		err = db.QueryRow(query, user.Username, user.Password).Scan(&info.ID, &info.Username, &info.Grade, &info.Phone)
+		err = db.QueryRow(query, user.Username).Scan(&info.ID, &info.Username, &info.Grade, &info.Phone)
 		if err != nil {
-			c.JSON(200, gin.H{"code": 401, "msg": "登录失败"})
+			//c.JSON(200, gin.H{"code": 401, "msg": "登录失败"})
+			c.Error(err).SetType(gin.ErrorTypePrivate)
 			return
 		}
 		// 存入session
-		session = sessions.Default(c)
 		session.Set("uid", info.ID)
 		err = session.Save()
 		if err != nil {
@@ -148,30 +140,86 @@ func login(c *gin.Context) {
 		}
 		db.Exec(query, info.ID, lastTime, createTime, bindID)
 		c.JSON(200, gin.H{"code": 200, "data": info})
-	} else {
-		query := "SELECT id, username, role FROM users WHERE username = ? AND password = ?"
-		type Info struct {
-			ID       int64  `json:"id"`
-			Username string `json:"username"`
-		}
-		var info Info
-		var role int
-		db.QueryRow(query, user.Username, user.Password).Scan(&info.ID, &info.Username, &role)
-		if role != 1 {
-			c.JSON(200, gin.H{"code": 401, "msg": "无访问权限"})
-			return
-		} else {
+	} else { // 密码存在
+		// md5加密密码
+		sum := md5.Sum([]byte(user.Password))
+		user.Password = hex.EncodeToString(sum[:])
+		//  前后台登录
+		if !user.Status { // 前台登录
+			// 验证码验证
+			if user.Code != "" {
+				verify, ok := session.Get("code").(string)
+				if !ok {
+					c.JSON(200, gin.H{"code": 401, "msg": "验证码已失效"})
+					return
+				}
+				if user.Code != verify {
+					c.JSON(200, gin.H{"code": 401, "msg": "验证码验证失败"})
+					return
+				}
+				// 删除验证码
+				session.Delete("code")
+				session.Save()
+			}
+			query := "SELECT id, username, grade, phone FROM users WHERE username = ? AND password = ?"
+			type Info struct {
+				ID       int64  `db:"id"       json:"id"`
+				Username string `db:"username" json:"username"`
+				Grade    int    `db:"grade"    json:"grade"`
+				Phone    string `db:"phone"    json:"phone"`
+			}
+			var info Info
+			err = db.QueryRow(query, user.Username, user.Password).Scan(&info.ID, &info.Username, &info.Grade, &info.Phone)
+			if err != nil {
+				c.JSON(200, gin.H{"code": 401, "msg": "登录失败"})
+				return
+			}
 			// 存入session
-			session = sessions.Default(c)
 			session.Set("uid", info.ID)
 			err = session.Save()
 			if err != nil {
 				c.JSON(200, gin.H{"code": 401, "msg": "登录失败"})
 				return
 			}
+			//查询上次登录时间
+			query = "SELECT MAX(create_time) FROM login_log WHERE user_id = ?"
+			var lastTime string
+			db.QueryRow(query, info.ID).Scan(&lastTime)
+			//写入当前登录日志
+			query = "INSERT INTO login_log(user_id, last_time, create_time, bind_ip) VALUES (?, ?, ?, ?)"
+			createTime := time.Now().Format(timeFormat)
+			var bindID string
+			if user.BindIP {
+				bindID = getIP()
+			}
+			db.Exec(query, info.ID, lastTime, createTime, bindID)
 			c.JSON(200, gin.H{"code": 200, "data": info})
+		} else { // 后台登录
+			query := "SELECT id, username, role FROM users WHERE username = ? AND password = ?"
+			type Info struct {
+				ID       int64  `json:"id"`
+				Username string `json:"username"`
+			}
+			var info Info
+			var role int
+			db.QueryRow(query, user.Username, user.Password).Scan(&info.ID, &info.Username, &role)
+			if role != 1 {
+				c.JSON(200, gin.H{"code": 401, "msg": "无访问权限"})
+				return
+			} else {
+				// 存入session
+				session = sessions.Default(c)
+				session.Set("uid", info.ID)
+				err = session.Save()
+				if err != nil {
+					c.JSON(200, gin.H{"code": 401, "msg": "登录失败"})
+					return
+				}
+				c.JSON(200, gin.H{"code": 200, "data": info})
+			}
 		}
 	}
+
 }
 
 // logout 注销登录
@@ -270,7 +318,7 @@ func updatePassword(c *gin.Context) {
 		// 排除管理员
 		if pass.Username != "admin" {
 			query := "SELECT EXISTS(SELECT id FROM users WHERE (username = ? OR mailbox = ? OR phone = ?) AND role <> 1)"
-			db.QueryRow(query, pass.Username).Scan(&exists)
+			db.QueryRow(query, pass.Username, pass.Username, pass.Username).Scan(&exists)
 			if !exists {
 				c.JSON(200, gin.H{"code": 401, "msg": "该账号不存在!"})
 				return

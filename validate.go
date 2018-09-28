@@ -108,7 +108,7 @@ func listValidate(c *gin.Context) {
 		args = append(args, typ, (page-1)*10)
 		db.QueryRow("SELECT COUNT(v.id) FROM validate v INNER JOIN users u ON v.user_id = u.id WHERE v.type = ?", typ).Scan(&total)
 	} else {
-		query = "SELECT v.id, u.real_name, u.id_card, v.hand_account, v.type, v.frontimg, v.oppositeimg, v.hand_card, v.status " +
+		query = "SELECT v.id, u.real_name, u.id_card, v.hand_account, v.type, v.frontimg, v.oppositeimg, v.hand_card, v.status, u.address, u.birthday, u.phone, u.proct, u.qq, u.sex " +
 			"FROM validate AS v INNER JOIN users AS u ON v.user_id = u.id ORDER BY v.status ASC LIMIT ?, 10"
 		args = append(args, (page-1)*10)
 		db.QueryRow("SELECT COUNT(v.id) FROM validate v INNER JOIN users u ON v.user_id = u.id").Scan(&total)
@@ -146,11 +146,11 @@ func showValidate(c *gin.Context) {
 	var args []interface{}
 	if c.Query("id") != "" {
 		id, _ := strconv.ParseInt(c.Query("id"), 10, 64)
-		query = "SELECT v.id, u.real_name, u.id_card, v.hand_account, v.type, v.frontimg, v.oppositeimg, v.hand_card, v.status " +
+		query = "SELECT v.id, u.real_name, u.id_card, v.hand_account, v.type, v.frontimg, v.oppositeimg, v.hand_card, v.status, u.address, u.birthday, u.phone, u.proct, u.qq, u.sex " +
 			"FROM validate v INNER JOIN users u ON v.user_id = u.id WHERE v.id = ?"
 		args = append(args, id)
 	} else {
-		query = "SELECT v.id, u.real_name, u.id_card, v.hand_account, v.type, v.frontimg, v.oppositeimg, v.hand_card, v.status " +
+		query = "SELECT v.id, u.real_name, u.id_card, v.hand_account, v.type, v.frontimg, v.oppositeimg, v.hand_card, v.status, u.address, u.birthday, u.phone, u.proct, u.qq, u.sex " +
 			"FROM validate v INNER JOIN users u ON v.user_id = u.id WHERE v.user_id = ?"
 		args = append(args, userID)
 	}
